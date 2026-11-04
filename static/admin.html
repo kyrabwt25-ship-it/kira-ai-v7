@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KIRA AI — لوحة المطور</title>
+<link rel="icon" href="/icon.jpg">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--brand:#c8102e;--brand-deep:#7a0f24;--accent:#e0a94a;--bg:#fff7f5;--card:#fff;--ink:#2a1a1e;--mute:#8a6f75;--line:#f0dcdc}
+@media (prefers-color-scheme:dark){:root{--bg:#1a1214;--card:#251a1d;--ink:#f6e9ea;--mute:#b79ca1;--line:#3a2a2e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",Tahoma,"Noto Sans Arabic",Arial,sans-serif;font-size:14px}
+header{display:flex;align-items:center;gap:10px;padding:12px 16px;color:#fff;background:linear-gradient(90deg,var(--brand-deep),var(--brand))}
+header img{width:38px;height:38px;border-radius:10px;border:2px solid var(--accent)}header h1{font-size:17px;margin:0}header a{color:#fff;margin-inline-start:auto;font-size:13px}
+nav{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+nav button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:7px 14px;font:inherit;cursor:pointer}
+nav button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+main{padding:16px;max-width:1000px;margin:0 auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat b{display:block;font-size:24px;color:var(--brand)}.stat span{color:var(--mute);font-size:12px}
+input,select,textarea{padding:8px 10px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font:inherit;max-width:100%}
+textarea{width:100%;min-height:110px}
+.btn{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:8px 14px;font:inherit;cursor:pointer}
+.btn.s{background:var(--card);color:var(--ink);border:1px solid var(--line)}
+table{width:100%;border-collapse:collapse}th,td{text-align:right;padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}th{color:var(--mute);font-weight:600}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.f{display:flex;flex-direction:column;gap:3px;font-size:12px;color:var(--mute)}.f input{width:130px}
+.tag{padding:2px 8px;border-radius:999px;background:var(--line);font-size:12px}.ok{color:#188a4a}.bad{color:var(--brand)}
+.scroll{overflow-x:auto}
+</style>
+</head>
+<body>
+<header><img src="/icon.jpg" alt=""><h1>KIRA AI — لوحة المطور</h1><a href="/">العودة للتطبيق</a></header>
+<nav id="nav"></nav>
+<main id="view">جارٍ التحميل...</main>
+<script>
+const LEVELS=["رياض الأطفال","المرحلة الابتدائية","المرحلة الإعدادية","المرحلة الثانوية","الجامعة"];
+const SUBJECTS=["الرياضيات","العلوم","اللغة العربية","اللغة الإنجليزية","الفيزياء","الكيمياء","الأحياء","مادة أخرى"];
+const TABS={stats:"نظرة عامة",users:"المستخدمون",plans:"الباقات",pay:"الاشتراكات والدفع",docs:"المناهج",ann:"النشر الجماعي",set:"الإعدادات"};
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const opts=(a,sel,blank)=>(blank?`<option value="">${blank}</option>`:'')+a.map(v=>`<option ${v===sel?'selected':''}>${esc(v)}</option>`).join('');
+let sb,token,plansCache=[];
+
+async function api(path,o={}){
+  const h={Authorization:'Bearer '+token};if(o.json)h['Content-Type']='application/json';
+  const r=await fetch('/api/admin'+path,{method:o.method||'GET',headers:h,body:o.json?JSON.stringify(o.json):o.body});
+  if(!r.ok){const j=await r.json().catch(()=>({}));throw new Error(j.detail||r.status)}return r.json()}
+const act=async(fn,msg)=>{try{await fn();if(msg)alert(msg)}catch(e){alert('خطأ: '+e.message)}};
+
+(async()=>{
+  const c=await (await fetch('/api/config')).json();sb=supabase.createClient(c.url,c.key);
+  const {data}=await sb.auth.getSession();if(!data.session){location='/';return}
+  token=data.session.access_token;
+  const me=await (await fetch('/api/me',{headers:{Authorization:'Bearer '+token}})).json();
+  if(me.role!=='admin'){$('view').textContent='غير مصرّح لك بدخول هذه الصفحة.';return}
+  $('nav').innerHTML=Object.entries(TABS).map(([k,v])=>`<button data-t="${k}">${v}</button>`).join('');
+  $('nav').onclick=e=>{const t=e.target.dataset.t;if(t)show(t)};show('stats');
+})();
+
+async function show(t){
+  document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));
+  $('view').textContent='جارٍ التحميل...';
+  try{await V[t]()}catch(e){$('view').textContent='خطأ: '+e.message}}
+
+const V={
+async stats(){const s=await api('/stats');
+  const st=[['المستخدمون',s.users],['مشتركون مدفوعون',s.paid_users],['رسائل اليوم',s.messages_today],['صور اليوم',s.images_today],
+    ['الإيرادات',s.revenue],['طلبات معلّقة',s.pending_payments],['كتب مرفوعة',s.docs],['مقاطع المنهج',s.chunks]];
+  $('view').innerHTML='<div class="grid">'+st.map(([a,b])=>`<div class="card stat"><b>${esc(b)}</b><span>${a}</span></div>`).join('')+'</div>'},
+
+async users(){
+  plansCache=await api('/plans');
+  $('view').innerHTML=`<div class="row"><input id="uq" placeholder="ابحث بالبريد"><button class="btn" id="us">بحث</button></div><div class="card scroll" id="ut"></div>`;
+  const load=async()=>{const rows=await api('/users?q='+encodeURIComponent($('uq').value));
+    $('ut').innerHTML='<table><tr><th>البريد</th><th>الباقة</th><th>ينتهي</th><th>تغيير الباقة</th><th>حالة</th></tr>'+rows.map(u=>`<tr>
+      <td>${esc(u.email)} ${u.role==='admin'?'<span class="tag">مدير</span>':''}</td><td>${esc(u.plan_id)}</td>
+      <td>${u.plan_expires_at?esc(u.plan_expires_at.slice(0,10)):'-'}</td>
+      <td><select data-p="${esc(u.id)}">${plansCache.map(p=>`<option value="${esc(p.id)}" ${p.id===u.plan_id?'selected':''}>${esc(p.name)}</option>`).join('')}</select>
+        <input type="number" value="30" min="1" style="width:60px" data-d="${esc(u.id)}"> يوم <button class="btn s" data-set="${esc(u.id)}">تطبيق</button></td>
+      <td><button class="btn s" data-ban="${esc(u.id)}" data-v="${u.banned?0:1}">${u.banned?'<span class="ok">رفع الحظر</span>':'<span class="bad">حظر</span>'}</button></td></tr>`).join('')+'</table>'};
+  $('us').onclick=load;await load();
+  $('ut').onclick=e=>{const b=e.target.closest('button');if(!b)return;
+    if(b.dataset.set){const id=b.dataset.set;act(async()=>{await api(`/users/${id}/plan`,{method:'POST',json:{plan_id:document.querySelector(`[data-p="${id}"]`).value,days:+document.querySelector(`[data-d="${id}"]`).value||30}});await load()},'تم')}
+    if(b.dataset.ban)act(async()=>{await api(`/users/${b.dataset.ban}/ban`,{method:'POST',json:{banned:b.dataset.v==='1'}});await load()})}},
+
+async plans(){const ps=await api('/plans');
+  const F=[['name','الاسم','text'],['model','النموذج','text'],['daily_messages','رسائل/يوم','number'],['daily_images','صور/يوم','number'],['max_tokens','أقصى طول للرد','number'],
+    ['price_weekly','سعر أسبوعي','number'],['price_monthly','سعر شهري','number'],['price_yearly','سعر سنوي','number']];
+  $('view').innerHTML=ps.map(p=>`<div class="card" data-id="${esc(p.id)}"><b>${esc(p.id)}</b>
+    <div class="row" style="margin-top:8px">${F.map(([k,l,t])=>`<label class="f">${l}<input data-k="${k}" type="${t}" step="any" value="${esc(p[k])}"></label>`).join('')}</div>
+    <label class="f">تعليمات أسلوب الإجابة لهذه الباقة<textarea data-k="style_rule">${esc(p.style_rule)}</textarea></label>
+    <button class="btn" style="margin-top:8px" data-save="${esc(p.id)}">حفظ</button></div>`).join('');
+  $('view').onclick=e=>{const id=e.target.dataset.save;if(!id)return;const card=e.target.closest('.card'),body={};
+    card.querySelectorAll('[data-k]').forEach(i=>body[i.dataset.k]=i.type==='number'?+i.value:i.value);
+    act(()=>api('/plans/'+id,{method:'PUT',json:body}),'تم الحفظ')}},
+
+async pay(){const rows=await api('/payments');
+  $('view').innerHTML=`<div class="card scroll"><table><tr><th>التاريخ</th><th>المستخدم</th><th>الباقة</th><th>المدة</th><th>المبلغ</th><th>الحالة</th><th>المحفظة</th><th>العملية</th><th></th></tr>`+
+    rows.map(r=>`<tr><td>${esc(r.created_at.slice(0,10))}</td><td>${esc(r.profiles?.email)}</td><td>${esc(r.plans?.name)}</td><td>${esc(r.period)}</td><td>${esc(r.amount)}</td>
+    <td class="${r.status==='paid'?'ok':''}">${esc(r.status)}</td><td dir="ltr">${esc(r.from_number)}</td><td dir="ltr">${esc(r.tx)}</td>
+    <td>${r.status==='pending'?`<button class="btn" data-c="${esc(r.id)}">تأكيد الدفع</button>`:''}</td></tr>`).join('')+'</table></div>';
+  $('view').onclick=e=>{const id=e.target.dataset.c;if(id&&confirm('تأكيد استلام المبلغ وتفعيل الاشتراك؟'))act(async()=>{await api(`/payments/${id}/confirm`,{method:'POST'});show('pay')})}},
+
+async docs(){const ds=await api('/docs');
+  $('view').innerHTML=`<div class="card"><b>رفع كتاب أو منهج</b> (PDF نصي أو TXT)
+    <div class="row" style="margin-top:8px"><input id="dt" placeholder="عنوان الكتاب"><select id="dl">${opts(LEVELS,'','كل المراحل')}</select>
+    <select id="ds">${opts(SUBJECTS,'','كل المواد')}</select><input id="df" type="file" accept=".pdf,.txt,.md"><button class="btn" id="du">رفع</button></div>
+    <div id="dmsg" style="color:var(--mute)">الملفات الممسوحة ضوئيًا (صور) لا تحتوي نصًا ولن تُقرأ.</div></div>
+    <div class="card scroll"><table><tr><th>العنوان</th><th>المرحلة</th><th>المادة</th><th></th></tr>`+
+    ds.map(d=>`<tr><td>${esc(d.title)}</td><td>${esc(d.level||'الكل')}</td><td>${esc(d.subject||'الكل')}</td><td><button class="btn s" data-del="${d.id}">حذف</button></td></tr>`).join('')+'</table></div>';
+  $('du').onclick=()=>{const f=$('df').files[0];if(!f||!$('dt').value)return alert('اكتب العنوان واختر ملفًا');
+    const fd=new FormData();fd.append('title',$('dt').value);fd.append('level',$('dl').value);fd.append('subject',$('ds').value);fd.append('file',f);
+    $('dmsg').textContent='جارٍ الرفع والمعالجة...';
+    act(async()=>{const r=await api('/docs',{method:'POST',body:fd});alert(r.chunks?`تم: ${r.chunks} مقطع`:'لم يُستخرج نص من الملف');show('docs')})};
+  $('view').onclick=e=>{const id=e.target.dataset.del;if(id&&confirm('حذف الكتاب؟'))act(async()=>{await api('/docs/'+id,{method:'DELETE'});show('docs')})}},
+
+async ann(){const r=await (await fetch('/api/announcements',{headers:{Authorization:'Bearer '+token}})).json();
+  $('view').innerHTML=`<div class="card"><b>نشر رسالة لكل المستخدمين</b><textarea id="at" placeholder="اكتب رسالتك..."></textarea><div style="margin-top:8px"><button class="btn" id="as">نشر للجميع</button></div></div><div class="card">`+
+   (r.map(x=>`<div class="row"><span style="flex:1">${esc(x.text)}</span><button class="btn s" data-da="${x.id}">حذف</button></div>`).join('')||'لا توجد رسائل')+'</div>';
+  $('as').onclick=()=>{if($('at').value.trim())act(async()=>{await api('/announce',{method:'POST',json:{text:$('at').value}});show('ann')},'تم النشر')};
+  $('view').onclick=e=>{const id=e.target.dataset.da;if(id)act(async()=>{await api('/announce/'+id,{method:'DELETE'});show('ann')})}},
+
+async set(){const s=await api('/settings');
+  $('view').innerHTML=`<div class="card"><label class="f">شخصية KIRA وتعليماتها العامة (تُرسل مع كل محادثة)<textarea id="sp" style="min-height:180px">${esc(s.persona)}</textarea></label></div>
+  <div class="card"><label class="f">وضع الصيانة: اكتب رسالة لإيقاف الشات مؤقتًا (اتركها فارغة للتشغيل)<input id="sm" style="width:100%" value="${esc(s.maintenance)}"></label></div>
+  <button class="btn" id="ss">حفظ الإعدادات</button>`;
+  $('ss').onclick=()=>act(()=>api('/settings',{method:'PUT',json:{persona:$('sp').value,maintenance:$('sm').value}}),'تم الحفظ')}
+};
+</script>
+</body>
+</html>
